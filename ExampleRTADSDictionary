@@ -1,0 +1,62 @@
+import com.thomsonreuters.ema.access.*;
+import com.thomsonreuters.ema.rdm.Dictionary;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+
+public class ExampleRTADSDictionary implements OmmConsumerClient {
+    private OmmConsumer consumer = null;
+    private Lock clientLock = new ReentrantLock();
+    private boolean dictionaryReceived = false;
+
+    public DictionaryDownloader() {
+        try {
+            consumer = EmaFactory.createOmmConsumer(EmaFactory.createOmmConsumerConfig());
+
+            // Create a request message for the data dictionary
+            ReqMsg reqMsg = EmaFactory.createReqMsg();
+            reqMsg.serviceName("ADS_RSSL_SERVICE_NAME"); // Replace with your ADS service name
+            reqMsg.name("RWFFld"); // Request for field dictionary
+            reqMsg.interestAfterRefresh(false);
+
+            // Send the request
+            consumer.registerClient(reqMsg, this);
+        } catch (OmmException ex) {
+            System.out.println("Exception: " + ex.getMessage());
+        }
+    }
+
+    @Override
+    public void onRefreshMsg(RefreshMsg refreshMsg, OmmConsumerEvent event) {
+        if (refreshMsg.payload().dataType() == DataTypes.SERIES) {
+            Series series = refreshMsg.payload().series();
+            if (series != null && series.summaryData() != null) {
+                // Extract and process the dictionary here
+                Dictionary dictionary = DictionaryFactory.create();
+                dictionary.decodeFieldDictionary(series.summaryData().byteBuffer());
+                // Set a flag to indicate that the dictionary has been received
+                dictionaryReceived = true;
+            }
+        }
+    }
+
+    @Override
+    public void onUpdateMsg(UpdateMsg updateMsg, OmmConsumerEvent event) {
+        // Handle update messages if needed
+    }
+
+    public static void main(String[] args) {
+        DictionaryDownloader downloader = new DictionaryDownloader();
+        try {
+            // Wait for the dictionary to be received
+            while (!downloader.dictionaryReceived) {
+                Thread.sleep(1000);
+            }
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        } finally {
+            if (downloader.consumer != null) {
+                downloader.consumer.uninitialize();
+            }
+        }
+    }
+}
